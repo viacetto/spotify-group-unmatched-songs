@@ -1,0 +1,297 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Example of the Authorization Code flow with Spotify</title>
+    <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+    <style type="text/css">
+        #login,
+        #loggedin {
+            display: none;
+        }
+        
+        .text-overflow {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            width: 500px;
+        }
+    </style>
+    <!-- <script src="./app.js"></script> -->
+</head>
+
+<body>
+    <div class="container">
+        <div id="login">
+            <h1>This is an example of the Authorization Code flow</h1>
+            <a href="/login" class="btn btn-primary">Log in with Spotify</a>
+        </div>
+        <div id="loggedin">
+            <div id="user-profile">
+            </div>
+            <div id="oauth">
+            </div>
+            <button style="display:none" class="btn btn-default" id="obtain-new-token">Obtain new token using the refresh token</button>
+            <div>
+                <h2>Summary Info</h2>
+                <dl>
+                    <dt>tracksList: <dd id="tracksList">loading...</dd></dt>
+                    <dt>playlistsTracksList: <dd id="playlistsTracksList">loading...</dd></dt>
+                    <dt>common: <dd id="common">loading...</dd></dt>
+                    <dt>difference: <dd id="difference">loading...</dd></dt>
+                </dl>
+                <button class="btn btn-default" style="display:none" id="addDifferenceToUnmatched">Add</button>
+                <h4 id="resultMessage"></h4>
+            </div>
+        </div>
+    </div>
+
+    <script id="user-profile-template" type="text/x-handlebars-template">
+        <h1>Logged in as {{display_name}}</h1>
+        <div class="media">
+            <div class="pull-left">
+                <img class="media-object" width="150" src="{{images.0.url}}" />
+            </div>
+            <div class="media-body">
+                <dl class="dl-horizontal">
+                    <dt>Display name</dt>
+                    <dd class="clearfix">{{display_name}}</dd>
+                    <dt>Id</dt>
+                    <dd>{{id}}</dd>
+                    <!-- <dt>Email</dt>
+                    <dd>{{email}}</dd> -->
+                    <dt>Spotify URI</dt>
+                    <dd><a href="{{external_urls.spotify}}">{{external_urls.spotify}}</a></dd>
+                    <dt>Link</dt>
+                    <dd><a href="{{href}}">{{href}}</a></dd>
+                    <!-- <dt>Profile Image</dt>
+                    <dd class="clearfix"><a href="{{images.0.url}}">{{images.0.url}}</a></dd>
+                    <dt>Country</dt>
+                    <dd>{{country}}</dd> -->
+                </dl>
+            </div>
+        </div>
+    </script>
+
+    <script id="oauth-template" type="text/x-handlebars-template">
+        <h2>oAuth info</h2>
+        <dl class="dl-horizontal">
+            <dt>Access token</dt>
+            <dd class="text-overflow">{{access_token}}</dd>
+            <dt>Refresh token</dt>
+            <dd class="text-overflow">{{refresh_token}}</dd>
+        </dl>
+    </script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/2.0.0-alpha.1/handlebars.min.js"></script>
+    <script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+    <script>
+        (function() {
+            /**
+             * Obtains parameters from the hash of the URL
+             * @return Object
+             */
+            function getHashParams() {
+                var hashParams = {};
+                var e, r = /([^&;=]+)=?([^&;]*)/g,
+                    q = window.location.hash.substring(1);
+                while (e = r.exec(q)) {
+                    hashParams[e[1]] = decodeURIComponent(e[2]);
+                }
+                return hashParams;
+            }
+
+            var userProfileSource = document.getElementById('user-profile-template').innerHTML,
+                userProfileTemplate = Handlebars.compile(userProfileSource),
+                userProfilePlaceholder = document.getElementById('user-profile');
+
+            var oauthSource = document.getElementById('oauth-template').innerHTML,
+                oauthTemplate = Handlebars.compile(oauthSource),
+                oauthPlaceholder = document.getElementById('oauth');
+
+            var params = getHashParams();
+            var access_token = params.access_token,
+                refresh_token = params.refresh_token,
+                error = params.error;
+
+            unmatched = "*unmatched"
+
+
+            $('#login').show();
+            window.alert(`Warning: before logging in you need to have created a playlist named \n " *unmatched " which will be the place for saving the difference song(s) `)
+            if (error) {
+                alert('There was an error during the authentication');
+            } else {
+                if (access_token) {
+                    // render oauth info
+                    oauthPlaceholder.innerHTML = oauthTemplate({
+                        access_token: access_token,
+                        refresh_token: refresh_token
+                    });
+
+
+                    let intervalPost
+                    const postFetch = () => {
+                        let spliceResult = difference.splice(difference.length - 100, difference.length)
+                        fetch(`https://api.spotify.com/v1/playlists/${unmatched}/tracks`, {
+                            method: 'POST',
+                            body: JSON.stringify(spliceResult),
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + access_token,
+                            }
+                        }).then(res => console.log)
+                        if (difference.length === 0) {
+                            clearInterval(intervalPost)
+                            $('#resultMessage').text(`${differenceBefore} song(s) added to unmatched playlist successfully!`)
+                        }
+                    }
+                    counter = 0;
+                    const getPlaylistsSongs = (url) => {
+                        $.ajax({
+                            url: url,
+                            headers: {
+                                'Authorization': 'Bearer ' + access_token
+                            },
+                            success: function(response) {
+                                response = response.tracks ? response.tracks : response;
+                                if (response.next !== null) {
+                                    getPlaylistsSongs(response.next)
+                                }
+                                response.items.forEach(i => playlistsTracksList.add(i.track.uri))
+                            },
+                            error: (e) => {
+                                console.log(e.responseText)
+                            }
+                        });
+                        counter += 1;
+                    }
+
+                    getAllPlaylists = (url) => {
+                        $.ajax({
+                            url: url,
+                            headers: {
+                                'Authorization': 'Bearer ' + access_token
+                            },
+                            success: function(response) {
+                                response.items.forEach(els => tab.push(els))
+                                if (response.next !== null) {
+                                    getAllPlaylists(response.next)
+                                } else {
+                                    usersCreatedPlaylists = tab.filter(p => p.owner.display_name == "vousetti")
+                                    usersCreatedPlaylists.forEach(playlist => {
+                                        unmatched = playlist.name == "*unmatched" ? playlist.id : unmatched
+                                        playlistsIdList.push(playlist.id)
+                                    });
+
+                                    for (let id of playlistsIdList) {
+                                        getPlaylistsSongs(`https://api.spotify.com/v1/playlists/${id}`)
+                                    }
+                                    loadStats = () => {
+                                        playlistsTracksList = [...playlistsTracksList]
+                                        common = tracksList.filter(x => playlistsTracksList.includes(x));
+                                        difference = tracksList.filter(x => !playlistsTracksList.includes(x));
+                                        console.log("tracksList: " + tracksList.length)
+                                        console.log("playlistsTracksList: " + playlistsTracksList.length)
+                                        console.log("common: " + common.length)
+                                        console.log("difference: " + difference.length)
+                                        $('#tracksList').text(tracksList.length)
+                                        $('#playlistsTracksList').text(playlistsTracksList.length)
+                                        $('#common').text(common.length)
+                                        $('#difference').text(difference.length)
+                                        differenceBefore = difference.length
+                                        console.log(difference.length)
+                                        addDifferenceToUnmatched = () => {
+                                            intervalPost = setInterval(postFetch, 500);
+                                        }
+                                        if (difference.length > 0) {
+                                            $('#addDifferenceToUnmatched').css('display', 'block')
+                                            $('#addDifferenceToUnmatched').on('click', () => {
+                                                addDifferenceToUnmatched()
+                                                $('#addDifferenceToUnmatched').css('display', 'none')
+                                                $('#resultMessage').text(`adding to playlist ${difference.length} song(s)...`)
+                                            })
+                                        } else {
+                                            $('#resultMessage').text('there is no songs to be added :)')
+                                        }
+                                    }
+                                    setTimeout(() => {
+                                        loadStats()
+                                    }, 1000);
+                                }
+                            }
+                        });
+                    }
+
+
+
+                    getPageOfSongs = (url) => {
+                        $.ajax({
+                            url: url,
+                            headers: {
+                                'Authorization': 'Bearer ' + access_token
+                            },
+                            success: function(response) {
+                                console.log(response)
+                                response.items.forEach(r => tracksList.push(r.track.uri))
+                                allData.push(...response.items)
+                                if (response.next !== null) {
+                                    getPageOfSongs(response.next)
+                                } else {
+                                    getAllPlaylists("https://api.spotify.com/v1/users/vousetti/playlists?offset=0&limit=50")
+                                }
+
+                            }
+                        });
+                    }
+
+
+                    $.ajax({
+                        url: 'https://api.spotify.com/v1/me',
+                        headers: {
+                            'Authorization': 'Bearer ' + access_token
+                        },
+                        success: function(response) {
+                            userProfilePlaceholder.innerHTML = userProfileTemplate(response);
+
+                            $('#login').hide();
+                            $('#loggedin').show();
+
+
+
+                            allData = []
+                            tracksList = [];
+                            playlistsIdList = [];
+                            playlistsTracksList = new Set();
+                            tab = []
+
+                            getPageOfSongs("https://api.spotify.com/v1/me/tracks?offset=0&limit=50")
+
+                        }
+                    });
+
+                } else {
+                    // render initial screen
+                    $('#login').show();
+                    $('#loggedin').hide();
+                }
+
+                document.getElementById('obtain-new-token').addEventListener('click', function() {
+                    $.ajax({
+                        url: '/refresh_token',
+                        data: {
+                            'refresh_token': refresh_token
+                        }
+                    }).done(function(data) {
+                        access_token = data.access_token;
+                        oauthPlaceholder.innerHTML = oauthTemplate({
+                            access_token: access_token,
+                            refresh_token: refresh_token
+                        });
+                    });
+                }, false);
+            }
+        })();
+    </script>
+</body>
+
+</html>
